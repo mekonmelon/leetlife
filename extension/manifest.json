@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "LeetLife Bridge",
+  "version": "0.1.0",
+  "description": "Tells the LeetLife menu-bar app when a LeetCode submission is accepted.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://leetcode.com/*", "http://127.0.0.1/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://leetcode.com/problems/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": { "service_worker": "background.js" }
+}

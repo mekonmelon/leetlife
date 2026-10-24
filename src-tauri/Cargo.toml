@@ -1,0 +1,75 @@
+[package]
+name = "leetlife"
+version = "0.1.0"
+description = "LeetLife — a local-first LeetCode life sim living in your macOS menu bar"
+edition = "2021"
+rust-version = "1.80"
+
+[lib]
+name = "leetlife"
+path = "src/lib.rs"
+crate-type = ["rlib"]
+# Only the files in benches/ are benchmarks; without this, `cargo bench` also
+# runs the unit-test harness and chokes on Criterion's flags.
+bench = false
+
+[[bin]]
+name = "leetlife"
+path = "src/main.rs"
+required-features = ["desktop"]
+bench = false
+
+# The core (engine, storage, scheduler, recommendation, events, metrics) builds
+# and tests without the desktop shell. `--no-default-features` compiles just
+# that core: it keeps the Tauri dependency out of the logic, and makes tests and
+# benchmarks fast to build.
+[features]
+default = ["desktop"]
+desktop = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-notification", "dep:tauri-plugin-autostart", "dep:tauri-plugin-positioner"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [], optional = true }
+
+[dependencies]
+# Desktop shell (optional: see the `desktop` feature)
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"], optional = true }
+tauri-plugin-notification = { version = "2", optional = true }
+tauri-plugin-autostart = { version = "2", optional = true }
+tauri-plugin-positioner = { version = "2", features = ["tray-icon"], optional = true }
+
+# Core
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+chrono = { version = "0.4", features = ["serde", "clock"] }
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+async-trait = "0.1"
+parking_lot = "0.12"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+tempfile = "3"
+
+[[bench]]
+name = "recommendation"
+harness = false
+
+[[bench]]
+name = "events"
+harness = false
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
+
+[profile.bench]
+debug = true
