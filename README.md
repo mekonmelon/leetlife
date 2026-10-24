@@ -31,9 +31,7 @@ renders snapshots it is handed.
                   SQLite
 ```
 
-## The one design rule
-
-**React renders the world; Rust owns the truth.**
+## Design Rule
 
 The UI never decides whether the avatar ate breakfast. It asks the backend for a
 snapshot. The backend decides that the solve satisfied the breakfast task,
