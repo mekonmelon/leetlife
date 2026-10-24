@@ -43,6 +43,7 @@ fn empty_snapshot() -> Snapshot {
         room_level: 0,
         due_reviews: 0,
         last_reward: None,
+        home: Default::default(),
     }
 }
 

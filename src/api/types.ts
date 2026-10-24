@@ -95,6 +95,11 @@ export interface RewardSummary {
   at: number;
 }
 
+export type RoomId = "hearth" | "studio" | "loft";
+export interface Placement { room: RoomId; x: number; y: number; }
+export interface Flower { species: string; planted_at: number; watered_at: number | null; }
+export interface HomeLayout { placements: Record<string, Placement>; wallpapers: Partial<Record<RoomId, string>>; garden?: Record<string, Flower>; }
+
 export interface Snapshot {
   version: number;
   generated_at: number;
@@ -112,6 +117,7 @@ export interface Snapshot {
   room_level: number;
   due_reviews: number;
   last_reward: RewardSummary | null;
+  home?: HomeLayout;
 }
 
 export interface DayCount {
@@ -190,6 +196,7 @@ export interface SettingsView {
   values: Record<string, string>;
   autostart: boolean;
   ingest_port: number;
+  data_path?: string;
 }
 
 export interface SyncReport {

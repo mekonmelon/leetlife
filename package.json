@@ -16,7 +16,10 @@
     "check:rust": "cd src-tauri && cargo check --no-default-features --all-targets",
     "check:desktop": "cd src-tauri && cargo check --all-targets",
     "bench:profile": "cd src-tauri && cargo bench --no-default-features",
-    "icons": "python3 scripts/gen_icns.py build"
+    "icons": "python3 scripts/gen_icns.py build",
+    "start": "bash scripts/macos.sh run",
+    "desktop": "bash scripts/macos.sh dev",
+    "build:mac": "bash scripts/macos.sh build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
@@ -37,5 +40,8 @@
     "typescript": "^5.9.0",
     "vite": "^8.3.0",
     "vitest": "^5.0.1"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

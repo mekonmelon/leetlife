@@ -9,10 +9,10 @@ export const SLOT_LABEL: Record<Slot, string> = {
 };
 
 export const SLOT_ICON: Record<Slot, string> = {
-  breakfast: "🍳",
-  training: "🏋️",
-  work: "💼",
-  evening: "🌙",
+  breakfast: "tea",
+  training: "leaf",
+  work: "star",
+  evening: "moon",
 };
 
 export const DIFFICULTY_LABEL: Record<Difficulty, string> = {

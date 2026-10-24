@@ -1,3 +1,4 @@
+import { Icon } from "./Icon";
 import { SLOT_ICON, SLOT_LABEL, timeLeft } from "../api/format";
 import type { DailyTask } from "../api/types";
 
@@ -22,7 +23,7 @@ export function TaskList({
           <li key={task.id} className="task" data-status={task.status} data-slot={task.slot}>
             <div className="task-head">
               <span className="task-slot">
-                <span aria-hidden>{SLOT_ICON[task.slot]}</span> {SLOT_LABEL[task.slot]}
+                <span aria-hidden><Icon name={SLOT_ICON[task.slot]} size={13}/></span> {SLOT_LABEL[task.slot]}
               </span>
               {left && <span className="task-left" data-overdue={left === "overdue" ? "true" : undefined}>{left}</span>}
             </div>
@@ -35,10 +36,10 @@ export function TaskList({
                 <button
                   className="task-done"
                   onClick={() => onComplete(task)}
-                  disabled={busyId === task.id}
+                  disabled={busyId !== null}
                   aria-label={`Mark ${task.title} complete`}
                 >
-                  {busyId === task.id ? "…" : "Done"}
+                  {busyId === task.id ? "…" : "I did it"}
                 </button>
               ) : (
                 <span className="task-badge" data-status={task.status}>

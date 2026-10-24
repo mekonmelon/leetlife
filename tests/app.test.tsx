@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { render, screen, waitFor, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, cleanup, act } from "@testing-library/react";
 import App from "../src/App";
 import { __setTransport } from "../src/api/client";
 import type { Snapshot } from "../src/api/types";
@@ -54,8 +54,20 @@ function transport() {
           { item: { id: 3, name: "Bed", category: "furniture", cost: 150, asset_path: "furniture/bed", description: "For naps.", min_level: 1 }, owned: false, affordable: true, unlocked: true },
           { item: { id: 9, name: "Cat", category: "pet", cost: 400, asset_path: "pets/cat", description: "Sits on keys.", min_level: 8 }, owned: false, affordable: true, unlocked: false },
         ];
+      case "place_item": {
+        const id = Number(args?.itemId);
+        snapshot = {...snapshot,version:snapshot.version+1,home:{placements:{...snapshot.home?.placements,[id]:args?.placement as import("../src/api/types").Placement},wallpapers:{...snapshot.home?.wallpapers}}};
+        return snapshot;
+      }
       case "purchase_item":
         throw new Error("not enough coins: this costs 150 and you have 20");
+      case "garden_action": {
+        const garden={...snapshot.home?.garden},plot=Number(args?.plot);
+        if(args?.action==="plant")garden[plot]={species:String(args?.species),planted_at:Math.floor(Date.now()/1000),watered_at:null};
+        if(args?.action==="water")garden[plot]={...garden[plot],watered_at:Math.floor(Date.now()/1000)};
+        snapshot={...snapshot,version:snapshot.version+1,home:{placements:{...snapshot.home?.placements},wallpapers:{...snapshot.home?.wallpapers},garden}};
+        return snapshot;
+      }
       case "get_stats":
         return {
           total_solved: 87, total_attempts: 112,
@@ -82,21 +94,26 @@ function transport() {
 
 beforeEach(() => {
   cleanup();
+  vi.spyOn(Math, "random").mockReturnValue(0);
+  window.history.replaceState({}, "", "/");
   calls.length = 0;
   snapshot = structuredClone(baseSnapshot);
   __setTransport(transport() as never, async () => () => {});
 });
 
 describe("App", () => {
-  it("renders the house, the day header and today's tasks", async () => {
+  it("opens directly into the house, with quests available from the action dock", async () => {
     render(<App />);
-    expect(await screen.findByText("Wednesday — Day 24")).toBeInTheDocument();
-    expect(screen.getByTestId("house")).toBeInTheDocument();
+    expect(await screen.findByTestId("house")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button",{name:"Log problem"})).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button",{name:"Quests"}));
+    expect(screen.getByText("Wednesday — Day 24")).toBeInTheDocument();
     expect(screen.getByTestId("mood")).toHaveTextContent("I haven't eaten yet");
     expect(screen.getByText("Solve 1 Easy")).toBeInTheDocument();
     expect(screen.getByText("Train Graphs")).toBeInTheDocument();
-    expect(screen.getByText("💰 420")).toBeInTheDocument();
-    expect(screen.getByText("🔥 12")).toBeInTheDocument();
+    expect(screen.getByTitle("Coins for your cozy home")).toHaveTextContent("420");
+    expect(screen.getByTitle("Best streak: 18 days")).toHaveTextContent("12");
   });
 
   it("only draws furniture that is owned and equipped", async () => {
@@ -115,6 +132,7 @@ describe("App", () => {
 
   it("completing a task logs an attempt and shows the reward", async () => {
     render(<App />);
+    fireEvent.click(await screen.findByRole("button",{name:"Quests"}));
     const button = (await screen.findAllByRole("button", { name: /Mark Solve 1 Easy complete/ }))[0];
     fireEvent.click(button);
 
@@ -124,6 +142,7 @@ describe("App", () => {
 
   it("completing a task logs a problem that actually satisfies it", async () => {
     render(<App />);
+    fireEvent.click(await screen.findByRole("button",{name:"Quests"}));
     const button = (await screen.findAllByRole("button", { name: /Mark Solve 1 Easy complete/ }))[0];
     fireEvent.click(button);
     await waitFor(() => expect(calls.some((c) => c.cmd === "log_attempt")).toBe(true));
@@ -137,7 +156,7 @@ describe("App", () => {
   it("surfaces a backend refusal as a readable message", async () => {
     render(<App />);
     await screen.findByTestId("house");
-    fireEvent.click(screen.getByRole("tab", { name: "Shop" }));
+    fireEvent.click(screen.getByRole("button", { name: "Shop" }));
 
     const buy = await screen.findByRole("button", { name: "Buy" });
     fireEvent.click(buy);
@@ -147,14 +166,14 @@ describe("App", () => {
   it("locks shop items above the avatar's level", async () => {
     render(<App />);
     await screen.findByTestId("house");
-    fireEvent.click(screen.getByRole("tab", { name: "Shop" }));
+    fireEvent.click(screen.getByRole("button", { name: "Shop" }));
     expect(await screen.findByRole("button", { name: "Level 8 required" })).toBeDisabled();
   });
 
   it("shows analytics and the latency table on the stats tab", async () => {
     render(<App />);
     await screen.findByTestId("house");
-    fireEvent.click(screen.getByRole("tab", { name: "Stats" }));
+    fireEvent.click(screen.getByRole("button", { name: "Journal" }));
 
     expect(await screen.findByTestId("activity-chart")).toBeInTheDocument();
     expect(screen.getByTestId("topic-bars")).toHaveTextContent("Graphs");
@@ -162,5 +181,79 @@ describe("App", () => {
     const table = screen.getByTestId("metrics-table");
     expect(table).toHaveTextContent("Tray click → painted");
     expect(table).toHaveTextContent("38.0ms");
+  });
+});
+
+
+describe("cottage and window controls", () => {
+  it("lets an owned treasure move into a different room", async () => {
+    render(<App/>);
+    await screen.findByTestId("house");
+    fireEvent.click(screen.getByRole("button", {name:"Decorate"}));
+    fireEvent.change(screen.getByLabelText("Part of the house"),{target:{value:"loft"}});
+    fireEvent.change(screen.getByLabelText(/Bring a treasure/), {target:{value:"1"}});
+    fireEvent.click(screen.getByRole("button", {name:"Place here"}));
+    await waitFor(()=>expect(calls.find(c=>c.cmd==="place_item")?.args).toMatchObject({itemId:1,placement:{room:"loft"}}));
+    expect(await screen.findByTestId("furniture-furniture/plant")).toBeInTheDocument();
+    expect(screen.getByTestId("furniture-furniture/plant")).toHaveTextContent("loft");
+  });
+  it("connects the minimize button to the desktop command", async () => {
+    render(<App/>);
+    await screen.findByTestId("house");
+    fireEvent.click(screen.getByRole("button", {name:"Minimize LeetLife"}));
+    await waitFor(()=>expect(calls.some(c=>c.cmd==="minimize_window")).toBe(true));
+  });
+  it("renders a quick check-in and opens the full cottage from it", async () => {
+    window.history.replaceState({}, "", "/?view=summary");
+    render(<App/>);
+    const visit = await screen.findByRole("button", {name:"Visit the cottage"});
+    expect(screen.getByText("0/2 little quests")).toBeInTheDocument();
+    expect(screen.queryByTestId("house")).not.toBeInTheDocument();
+    fireEvent.click(visit);
+    await waitFor(()=>expect(calls.some(c=>c.cmd==="open_home")).toBe(true));
+  });
+});
+
+
+describe("returning to the world", () => {
+  it("returns from the garden to the whole house on a native visit", async () => {
+    const listeners = new Map<string, (payload: unknown)=>void>();
+    __setTransport(transport() as never, async (name, handler)=>{listeners.set(name,handler);return ()=>listeners.delete(name);});
+    render(<App/>);
+    const house=await screen.findByTestId("house");
+    fireEvent.click(screen.getByRole("button",{name:"Backyard"}));
+    expect(screen.getByRole("img",{name:/backyard flower garden/})).toBeInTheDocument();
+    await waitFor(()=>expect(listeners.has("home-visited")).toBe(true));
+    act(()=>listeners.get("home-visited")!(null));
+    expect(house).toBeInTheDocument();
+    await waitFor(()=>expect(screen.getByRole("img",{name:/pixel art cutaway/})).toBeInTheDocument());
+  });
+  it("explains the level gate without entering the locked garden", async()=>{
+    snapshot.avatar.level=1;
+    render(<App/>);
+    fireEvent.click(await screen.findByRole("button",{name:"Backyard · LV 3"}));
+    expect(screen.getByRole("dialog",{name:"Backyard unlock"})).toHaveTextContent("Reach level 3");
+    expect(screen.getByRole("img",{name:/pixel art cutaway/})).toBeInTheDocument();
+  });
+  it("closes a menu with Escape and leaves the game visible",async()=>{
+    render(<App/>);
+    fireEvent.click(await screen.findByRole("button",{name:"Quests"}));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    fireEvent.keyDown(window,{key:"Escape"});
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("house")).toBeInTheDocument();
+  });
+  it("plants and waters the selected flower bed through saved backend actions",async()=>{
+    render(<App/>);
+    fireEvent.click(await screen.findByRole("button",{name:"Backyard"}));
+    fireEvent.click(screen.getByRole("button",{name:"Flower bed 2, empty"}));
+    fireEvent.change(screen.getByRole("combobox",{name:"Flower seeds"}),{target:{value:"poppy"}});
+    fireEvent.click(screen.getByRole("button",{name:"Plant in bed 2 · 8 coins"}));
+    fireEvent.click(await screen.findByRole("button",{name:"Water flowers"}));
+    await waitFor(()=>expect(screen.getByRole("button",{name:"Growing quietly…"})).toBeDisabled());
+    expect(calls.filter(c=>c.cmd==="garden_action").map(c=>c.args)).toEqual([{action:"plant",plot:1,species:"poppy"},{action:"water",plot:1,species:"poppy"}]);
+    fireEvent.click(screen.getByRole("button",{name:"Decorate"}));
+    expect(screen.getByRole("img",{name:/pixel art cutaway/})).toBeInTheDocument();
+    expect(screen.queryByLabelText("Flower seeds")).not.toBeInTheDocument();
   });
 });

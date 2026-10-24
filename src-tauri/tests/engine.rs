@@ -165,7 +165,7 @@ async fn economy_enforces_coins_level_and_double_purchase() {
     let snap = engine.purchase_item(1).await.unwrap();
     assert_eq!(snap.avatar.coins, 40);
     assert_eq!(snap.inventory.len(), 1);
-    assert_eq!(snap.inventory[0].item.name, "Plant");
+    assert_eq!(snap.inventory[0].item.name, "Whisper fern");
 
     assert!(matches!(engine.purchase_item(1).await, Err(leetlife::Error::AlreadyOwned)));
     // Desk costs 120, we have 40.

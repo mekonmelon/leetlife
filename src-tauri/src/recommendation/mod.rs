@@ -194,12 +194,15 @@ pub fn recommend(
     let topic_map: HashMap<&str, &TopicScore> = topics.iter().map(|t| (t.topic.as_str(), t)).collect();
     let review_map: HashMap<i64, &ReviewState> = reviews.iter().map(|r| (r.problem_id, r)).collect();
 
-    let input_for = |p: &'_ ProblemMeta| ScoreInput {
-        problem: p,
-        topic: topic_map.get(p.topic.as_str()).copied(),
-        review: review_map.get(&p.id).copied(),
-        recent_attempts: recent.get(&p.id).copied().unwrap_or(0),
-        now,
+    let input_for = |index: usize| {
+        let p = &problems[index];
+        ScoreInput {
+            problem: p,
+            topic: topic_map.get(p.topic.as_str()).copied(),
+            review: review_map.get(&p.id).copied(),
+            recent_attempts: recent.get(&p.id).copied().unwrap_or(0),
+            now,
+        }
     };
 
     // (score, problem id, index). Small and Copy: scoring the whole catalogue
@@ -213,7 +216,7 @@ pub fn recommend(
             if filter.only_due && !review_map.get(&p.id).map_or(false, |r| r.due_at <= now) {
                 return None;
             }
-            let (score, _) = score_problem(&input_for(p), &w);
+            let (score, _) = score_problem(&input_for(i), &w);
             Some((score, p.id, i as u32))
         })
         .collect();
@@ -234,7 +237,7 @@ pub fn recommend(
         .into_iter()
         .map(|(score, _, idx)| {
             let p = &problems[idx as usize];
-            let input = input_for(p);
+            let input = input_for(idx as usize);
             let is_review = matches!(input.review, Some(r) if r.due_at <= now);
             Recommendation { problem: p.clone(), score, reason: explain(&input), is_review }
         })

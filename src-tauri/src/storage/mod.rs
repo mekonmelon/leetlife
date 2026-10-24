@@ -71,4 +71,17 @@ impl Db {
     pub async fn close(&self) {
         self.pool.close().await;
     }
+
+    /// SQLite makes a consistent standalone copy, including committed WAL data.
+    /// Copying only the live .db file could silently leave recent rewards out.
+    pub async fn backup(&self, destination: &Path) -> Result<()> {
+        if let Some(parent) = destination.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        sqlx::query("VACUUM INTO ?")
+            .bind(destination.to_string_lossy().as_ref())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
 }

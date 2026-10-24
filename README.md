@@ -1,8 +1,10 @@
 # LeetLife
 
 A macOS menu-bar life sim for LeetCode practice. Your avatar lives in a house.
-It gets fed when you solve an Easy before 10 AM, earns coins you spend on
-furniture, and gets quietly disappointed when you skip a day.
+A Susuwatari soot sprite lives in a pixel-art cutaway house. Practice problems,
+earn XP and coins, decorate your home, and watch your little world grow.
+All progress saves on your Mac in SQLite. No account, server, cloud database,
+or paid services are required. Manual logging works offline.
 
 Underneath the game it is a local-first, event-driven desktop system: a Rust
 core that owns all state, scheduling and persistence, and a React UI that only
@@ -107,7 +109,7 @@ rungs, lowers ease, and puts the problem back tomorrow.
 
 ### The daily plan
 
-At 08:00 the scheduler builds four slots, each with its own deadline:
+At local midnight (or first launch), the scheduler builds four slots, each with its own deadline:
 
 | Slot | Deadline | What it asks for |
 | --- | --- | --- |
@@ -151,24 +153,105 @@ The `ui.open` figure is a real end-to-end measurement, not a guess: the tray
 handler starts the timer, and the webview reports back on its first painted
 frame.
 
-## Running it
+## Open it on your Mac
+
+**Double-click `LeetLife.command` in Finder**, or run:
 
 ```bash
-npm install
-npm run tauri dev        # menu-bar app
-npm run dev              # just the UI in a browser, backed by a mock
+npm start
 ```
 
-Tests and benchmarks:
+The launcher finds your installed Node and Rust tools, builds the app on its
+first run, and opens it. Once built, you can open the standalone application at
+`src-tauri/target/release/bundle/macos/LeetLife.app`, or move that app to your
+Applications folder. The built app needs neither Node nor Rust nor a running
+terminal. This build is for personal use on your Mac; distribution to other
+people would need a separate signing/notarization setup.
+
+Open LeetLife from Finder to bring up its window, even when it is already
+running. Click the animated spirit in the menu bar for a quick check-in with needs,
+XP, coins, streak, and today’s next quest. Choose **Visit the cottage** for the
+full house. The check-in tucks away when you click outside. Drag the full window by its top strip to move it, resize it from its edges,
+or click the dash to minimize. Reopening preserves its current position.
+Press Escape to tuck away either window. Settings has an optional **Open LeetLife
+when I log in** switch. Normal launches open the popup; login launches stay quiet.
+
+### Your Ghibli house
+
+The window opens directly into one original pixel-art cutaway house. Susuwatari
+walks along the floor, climbs each stair, makes tea, reads, sweeps, and sleeps in
+the loft. Each visit starts at a random activity. Click a spot to send it there;
+at night it eventually returns to bed. Reduced Motion pauses autonomous walking.
+
+The small dock opens **Log problem**, **Shop**, **Decorate**, **Quests**,
+**Journal**, and **Settings**. Keys 1–6 open the same actions. Escape closes a
+menu, finishes decorating, or tucks away the game. The top strip drags the window;
+the upper-right controls minimize or hide it. The menu bar still offers a quick
+check-in and a shortcut back to the game.
+
+Use **Decorate**, choose a part of the house and an owned treasure, then click a
+tile to place it. **Place here** also places it at a default position. Wallpaper
+changes affect the chosen wall; old linen is free. Existing ownership and saved
+placements carry over into the pixel house. The shop includes pixel versions of
+Haku, Jiji, the Totoros, and other familiar companions.
+
+At **level 3**, the **Backyard** gate opens to a separate garden. Choose one of
+six beds and plant a daisy, poppy, or moonflower for 8 coins. Water it once, then
+let it bloom over 30 minutes from planting; flowers grow while the app is closed.
+Picking a mature flower earns 12 coins and frees the bed. Unlocks, spending,
+watering, and picking are validated and saved together by Rust. See the
+[artwork notes](assets/ARTWORK.md) for the pixel renderer sources.
+
+### Your save file
+
+Progress is stored in:
+
+```text
+~/Library/Application Support/dev.leetlife.app/leetlife.db
+```
+
+Your attempts, XP, coins, daily quests, furniture, review schedule, and settings
+persist across launches. Closing the app or rebuilding it does not reset them.
+In **Settings → Back up my world**, SQLite creates a consistent standalone copy
+in the save folder's `backups/` directory and reveals it in Finder. Keep a copy
+elsewhere if you'd like protection from losing the Mac itself. **Show save
+folder** opens the location without changing your save.
+
+To restore a backup: quit LeetLife completely, move the existing `leetlife.db`
+and any `leetlife.db-wal` / `leetlife.db-shm` files together to a safe folder,
+copy your chosen backup into the save folder as `leetlife.db`, then reopen the
+app. Never replace a database while LeetLife is running.
+
+### Development
+
+Build prerequisites: macOS Command Line Tools, Node 22.12+ (Node 24 recommended;
+`.nvmrc` is included), and Rust. The launcher handles tools installed through
+nvm and rustup even when Finder or the terminal hasn't loaded their shell setup.
+See [Tauri's prerequisites](https://v2.tauri.app/start/prerequisites/) for setup.
 
 ```bash
-npm test                                    # Vitest
-cd src-tauri && cargo test --no-default-features   # core: 48 tests, no Tauri
-cd src-tauri && cargo bench --no-default-features  # Criterion
+npm ci
+npm run desktop         # native app, hot reload
+npm run build:mac       # standalone .app, no DMG or developer account needed
+npm start               # open the most recently built .app
+npm run dev             # browser demo with clearly labelled sample data
 ```
 
-The core builds without the desktop shell (`--no-default-features`). That keeps
-Tauri out of the logic, and makes tests and benchmarks fast to compile.
+After changing the source, use `npm run build:mac` to update the standalone app.
+The browser demo is for previewing the interface; its sample progress resets
+on refresh. Use the Mac app for your actual saved game.
+
+```bash
+npm test
+npm run build
+export PATH="$HOME/.cargo/bin:$PATH"
+cd src-tauri
+cargo test --no-default-features --locked
+cargo check --all-targets --locked
+```
+
+The tests include disk-backed save/reopen, WAL-safe backups, midnight rollover,
+long absences, concurrent writes, task rewards, and external-submission deduplication.
 
 ## Getting your activity in
 
@@ -189,7 +272,8 @@ All three land in the same place: `ActivityProvider` normalises them into an
 ```
 src/                    React UI
   api/                  typed IPC client, shared types, browser mock
-  house/  avatar/       the room and the character, as inline SVG
+  game/  house/         pixel scenes, tile navigation, garden and decorating
+  avatar/              Susuwatari portrait for the menu bar check-in
   components/ pages/    meters, tasks, toast; house/solve/shop/stats/settings
   analytics/            dependency-free charts
 src-tauri/
@@ -199,3 +283,13 @@ src-tauri/
   benches/              Criterion
 extension/              optional Chrome bridge
 ```
+
+Native window regression check (after building and installing):
+
+```bash
+python3 scripts/test_macos_open.py
+```
+
+This checks a normal launch, restarts the real Mac app as a quiet login launch,
+then checks that opening it again restores the same process's visible window. It leaves the game open
+and does not modify your practice history.

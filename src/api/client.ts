@@ -1,7 +1,7 @@
 // The single place the UI talks to Rust. Outside Tauri (plain `vite dev`, or
 // tests) it falls back to an in-memory mock so the house still renders.
 import type {
-  AttemptOutcome, AppEvent, LogAttemptInput, MetricSummary, ProblemMeta,
+  Placement, RoomId, AttemptOutcome, AppEvent, LogAttemptInput, MetricSummary, ProblemMeta,
   Recommendation, SettingsView, ShopItem, Snapshot, Stats, SyncReport, AttemptRow,
 } from "./types";
 
@@ -56,6 +56,12 @@ export const api = {
   logAttempt: (input: LogAttemptInput) => call<AttemptOutcome>("log_attempt", { input }),
   purchaseItem: (itemId: number) => call<Snapshot>("purchase_item", { itemId }),
   setEquipped: (itemId: number, equipped: boolean) => call<Snapshot>("set_equipped", { itemId, equipped }),
+  placeItem: (itemId: number, placement: Placement) => call<Snapshot>("place_item", { itemId, placement }),
+  setWallpaper: (room: RoomId, asset: string) => call<Snapshot>("set_wallpaper", { room, asset }),
+  gardenAction: (action: "plant" | "water" | "harvest", plot: number, species?: string) => call<Snapshot>("garden_action", { action, plot, species: species ?? null }),
+  minimizeWindow: () => call<void>("minimize_window"),
+  openHome: () => call<void>("open_home"),
+  startDragging: async () => { if (isTauri()) { const { getCurrentWindow } = await import("@tauri-apps/api/window"); await getCurrentWindow().startDragging(); } },
   getShop: () => call<ShopItem[]>("get_shop"),
   getStats: () => call<Stats>("get_stats"),
   getRecommendations: (args?: { difficulty?: string; topic?: string; only_due?: boolean; limit?: number }) =>
@@ -71,10 +77,17 @@ export const api = {
   uiRendered: (renderMs?: number) => call<void>("ui_rendered", { renderMs: renderMs ?? null }),
   hideWindow: () => call<void>("hide_window"),
   quitApp: () => call<void>("quit_app"),
+  backupDatabase: () => call<string>("backup_database"),
+  showSaveFolder: () => call<void>("show_save_folder"),
+  openProblem: (slug: string) => {
+    if (isTauri()) return call<void>("open_problem", { slug });
+    window.open(`https://leetcode.com/problems/${encodeURIComponent(slug)}/`, "_blank", "noopener,noreferrer");
+    return Promise.resolve();
+  },
 };
 
 /** Subscribes to a backend event; resolves to an unlisten function. */
-export async function on(event: "state-changed" | "app-event" | "window-shown" | "nudge", handler: (payload: unknown) => void): Promise<() => void> {
+export async function on(event: "state-changed" | "app-event" | "window-shown" | "home-visited" | "nudge", handler: (payload: unknown) => void): Promise<() => void> {
   const listen = await getListen();
   return listen(event, handler);
 }

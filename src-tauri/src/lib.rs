@@ -25,6 +25,7 @@ pub mod engine;
 pub mod error;
 pub mod events;
 pub mod game;
+pub mod home;
 pub mod metrics;
 pub mod models;
 pub mod notifications;

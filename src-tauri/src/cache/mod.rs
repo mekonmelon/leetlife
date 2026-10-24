@@ -26,6 +26,8 @@ pub struct Snapshot {
     pub room_level: i64,
     pub due_reviews: i64,
     pub last_reward: Option<RewardSummary>,
+    #[serde(default)]
+    pub home: crate::home::HomeLayout,
 }
 
 pub struct StateCache {

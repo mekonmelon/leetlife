@@ -1,7 +1,7 @@
 // Owns the one piece of frontend state: the latest snapshot. The backend pushes
 // `state-changed` after every committed write, so this never polls.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, on } from "./api/client";
+import { api, isTauri, on } from "./api/client";
 import type { Snapshot } from "./api/types";
 
 export interface LeetLifeState {
@@ -45,11 +45,11 @@ export function useLeetLife(): LeetLifeState {
 
   const reload = useCallback(async () => {
     try {
-      setSnapshot(await api.getSnapshot());
+      applySnapshot(await api.refreshSnapshot());
     } catch (e) {
       setError(String(e));
     }
-  }, [setError]);
+  }, [setError, applySnapshot]);
 
   // Initial load, then report first-paint latency back to Rust.
   useEffect(() => {
@@ -88,18 +88,26 @@ export function useLeetLife(): LeetLifeState {
         return;
       }
       unsubs.push(a, b);
-    })();
+    })().catch((e) => { if (live) setError(String(e)); });
     return () => {
       live = false;
       for (const u of unsubs) u();
     };
-  }, [applySnapshot, reload]);
+  }, [applySnapshot, reload, setError]);
 
   // Deadlines are shown as "25m left", so the clock ticks once a minute.
   useEffect(() => {
     const t = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 30_000);
     return () => clearInterval(t);
   }, []);
+
+  // Keep an open popup current when a study session crosses local midnight.
+  useEffect(() => {
+    if (!isTauri() || !snapshot) return;
+    const date = new Date(now * 1000);
+    const today = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    if (snapshot.date !== today) void reload();
+  }, [now, snapshot?.date, reload]);
 
   useEffect(() => () => {
     if (rewardTimer.current) clearTimeout(rewardTimer.current);

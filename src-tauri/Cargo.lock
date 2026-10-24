@@ -2370,6 +2370,8 @@ dependencies = [
  "async-trait",
  "chrono",
  "criterion",
+ "objc2",
+ "objc2-foundation",
  "parking_lot",
  "rand 0.8.8",
  "reqwest 0.12.28",

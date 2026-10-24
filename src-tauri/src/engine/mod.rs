@@ -177,7 +177,7 @@ impl Engine {
 
     /// Migrate, seed, catch up on days the app was closed, build today's plan,
     /// restore persisted jobs and warm the cache. Idempotent.
-    pub async fn bootstrap(self: &Arc<Self>) -> Result<Arc<Snapshot>> {
+    pub async fn bootstrap(&self) -> Result<Arc<Snapshot>> {
         self.db.migrate().await?;
         let today = self.clock.today();
         let now = self.clock.now_ts();
@@ -202,13 +202,17 @@ impl Engine {
     }
 
     /// Runs `end_of_day` for every day between the last processed one and yesterday.
-    async fn catch_up_days(self: &Arc<Self>) -> Result<()> {
+    async fn catch_up_days(&self) -> Result<()> {
         let today = parse_date(&self.clock.today()).expect("today parses");
         let last = {
             let mut c = self.db.conn().await?;
             repo::get_setting(&mut c, SETTING_LAST_DAY_ENDED).await?.and_then(|s| parse_date(&s))
         };
         let Some(mut d) = last.and_then(|d| d.succ_opt()) else { return Ok(()) };
+        // Bound work after a long absence to the most recent month, rather
+        // than taking multiple launches to ever catch up to the present.
+        let earliest = today - chrono::Duration::days(MAX_CATCH_UP_DAYS);
+        d = d.max(earliest);
         let mut n = 0;
         while d < today && n < MAX_CATCH_UP_DAYS {
             self.end_of_day(d).await?;
@@ -218,14 +222,14 @@ impl Engine {
         Ok(())
     }
 
-    async fn restore_jobs(self: &Arc<Self>) -> Result<()> {
+    async fn restore_jobs(&self) -> Result<()> {
         let _w = self.write_lock.lock().await;
         let mut tx = self.db.begin().await?;
         let jobs = repo::pending_jobs(&mut tx).await?;
         let now = self.clock.now();
         let recurring = [
-            (JobKind::GenerateDailyPlan, next_daily(now, 8, 0)),
-            (JobKind::EndOfDay, next_daily(now, 23, 55)),
+            (JobKind::GenerateDailyPlan, next_daily(now, 0, 0)),
+            (JobKind::EndOfDay, next_daily(now, 0, 0)),
             (JobKind::FlushMetrics, now.timestamp() + METRICS_FLUSH_SECS),
             (JobKind::SyncActivity, now.timestamp() + SYNC_SECS),
         ];
@@ -307,6 +311,8 @@ impl Engine {
         let due_reviews = repo::count_due_reviews(c, now_ts).await?;
         let (xp_into_level, xp_for_next_level) = avatar.xp_into_level();
         let mood = game::mood_line(&avatar, &tasks, now.hour());
+        let home = repo::get_setting(c, crate::home::SETTING_HOME_LAYOUT).await?
+            .map(|value| serde_json::from_str(&value)).transpose()?.unwrap_or_default();
         Ok(Snapshot {
             version: 0,
             generated_at: now_ts,
@@ -324,6 +330,7 @@ impl Engine {
             room_level,
             due_reviews,
             last_reward: self.last_reward.lock().clone(),
+            home,
         })
     }
 
@@ -445,6 +452,11 @@ impl Engine {
     /// The main reducer: one attempt, one transaction.
     pub async fn log_attempt(&self, input: LogAttemptInput) -> Result<AttemptOutcome> {
         let _t = self.metrics.timer(names::IPC_LOG_ATTEMPT);
+        // The Mac may have slept across midnight before the scheduler woke.
+        if self.cache.get().map_or(true, |s| s.date != self.clock.today()) {
+            self.catch_up_days().await?;
+            self.generate_daily_plan(self.clock.now().date_naive()).await?;
+        }
         let _w = self.write_lock.lock().await;
         let mut tx = self.db.begin().await?;
         let (applied, effects) = {
@@ -678,6 +690,85 @@ impl Engine {
         self.refresh_snapshot().await
     }
 
+    /// Decorating is an owned-item operation, committed with its equip state.
+    pub async fn place_item(&self, item_id: i64, placement: crate::home::Placement) -> Result<Arc<Snapshot>> {
+        placement.validate()?;
+        let _w = self.write_lock.lock().await;
+        let mut tx = self.db.begin().await?;
+        if !repo::owns_item(&mut tx, item_id).await? {
+            return Err(Error::Invalid("Find this treasure in the shop first".into()));
+        }
+        let item = repo::item(&mut tx, item_id).await?.ok_or(Error::UnknownItem(item_id))?;
+        if matches!(item.category.as_str(), "wallpaper" | "outfit" | "room") {
+            return Err(Error::Invalid("This treasure cannot be moved around the room".into()));
+        }
+        let mut home: crate::home::HomeLayout = repo::get_setting(&mut tx, crate::home::SETTING_HOME_LAYOUT).await?
+            .map(|value| serde_json::from_str(&value)).transpose()?.unwrap_or_default();
+        home.placements.insert(item_id, placement);
+        repo::set_setting(&mut tx, crate::home::SETTING_HOME_LAYOUT, &serde_json::to_string(&home)?).await?;
+        repo::set_equipped(&mut tx, item_id, true).await?;
+        tx.commit().await?;
+        self.refresh_snapshot().await
+    }
+
+    /// Garden writes and coin changes commit together. Unlocks are enforced here.
+    pub async fn garden_action(&self, action: &str, plot: u8, species: Option<&str>) -> Result<Arc<Snapshot>> {
+        use crate::home::{Flower, HomeLayout, FLOWER_GROW_SECONDS, GARDEN_LEVEL, SETTING_HOME_LAYOUT};
+        if plot >= 6 { return Err(Error::Invalid("Choose one of the six flower beds".into())); }
+        let _w = self.write_lock.lock().await;
+        let now = self.clock.now_ts();
+        let mut tx = self.db.begin().await?;
+        let mut avatar = repo::load_avatar(&mut tx).await?.ok_or_else(|| Error::Invalid("Open your home first".into()))?;
+        if avatar.level < GARDEN_LEVEL { return Err(Error::LevelRequired(GARDEN_LEVEL)); }
+        let mut home: HomeLayout = repo::get_setting(&mut tx, SETTING_HOME_LAYOUT).await?
+            .map(|value| serde_json::from_str(&value)).transpose()?.unwrap_or_default();
+        match action {
+            "plant" => {
+                let species = species.filter(|s| ["daisy", "poppy", "moonflower"].contains(s))
+                    .ok_or_else(|| Error::Invalid("Choose a flower from the seed pouch".into()))?;
+                if home.garden.contains_key(&plot) { return Err(Error::Invalid("A flower is already growing here".into())); }
+                if avatar.coins < 8 { return Err(Error::InsufficientCoins { need: 8, have: avatar.coins }); }
+                avatar.apply(&Reward { coins: -8, ..Default::default() }, now);
+                home.garden.insert(plot, Flower { species: species.into(), planted_at: now, watered_at: None });
+            },
+            "water" => {
+                let flower = home.garden.get_mut(&plot).ok_or_else(|| Error::Invalid("Plant a seed here first".into()))?;
+                if flower.watered_at.is_some() { return Err(Error::Invalid("Already watered. Let it grow a little".into())); }
+                flower.watered_at = Some(now);
+            },
+            "harvest" => {
+                let flower = home.garden.get(&plot).ok_or_else(|| Error::Invalid("Nothing is growing here yet".into()))?;
+                if flower.watered_at.is_none() || now - flower.planted_at < FLOWER_GROW_SECONDS {
+                    return Err(Error::Invalid("Water your flower and give it 30 minutes to bloom".into()));
+                }
+                home.garden.remove(&plot);
+                avatar.apply(&Reward { coins: 12, happiness: 2, ..Default::default() }, now);
+            },
+            _ => return Err(Error::Invalid("Choose plant, water, or pick".into())),
+        }
+        repo::save_avatar(&mut tx, &avatar).await?;
+        repo::set_setting(&mut tx, SETTING_HOME_LAYOUT, &serde_json::to_string(&home)?).await?;
+        tx.commit().await?;
+        self.refresh_snapshot().await
+    }
+
+    pub async fn set_wallpaper(&self, room: &str, asset: &str) -> Result<Arc<Snapshot>> {
+        if !crate::home::ROOMS.contains(&room) {
+            return Err(Error::Invalid("Choose a room in your cottage".into()));
+        }
+        let _w = self.write_lock.lock().await;
+        let mut tx = self.db.begin().await?;
+        if asset != "wallpapers/linen" && !repo::inventory(&mut tx).await?.iter().any(|owned| owned.item.category == "wallpaper" && owned.item.asset_path == asset) {
+            return Err(Error::Invalid("Find this wallpaper in the shop first".into()));
+        }
+        let mut home: crate::home::HomeLayout = repo::get_setting(&mut tx, crate::home::SETTING_HOME_LAYOUT).await?
+            .map(|value| serde_json::from_str(&value)).transpose()?.unwrap_or_default();
+        home.wallpapers.insert(room.to_string(), asset.to_string());
+        repo::set_setting(&mut tx, crate::home::SETTING_HOME_LAYOUT, &serde_json::to_string(&home)?).await?;
+        tx.commit().await?;
+        self.refresh_snapshot().await
+    }
+
     /// Builds the plan for `date` if it doesn't exist yet. Returns the tasks either way.
     pub async fn generate_daily_plan(&self, date: NaiveDate) -> Result<Vec<DailyTask>> {
         let _w = self.write_lock.lock().await;
@@ -886,8 +977,9 @@ impl JobHandler for Engine {
         let now = self.clock.now();
         match job.kind {
             JobKind::GenerateDailyPlan => {
+                self.catch_up_days().await?;
                 self.generate_daily_plan(now.date_naive()).await?;
-                self.reschedule(JobKind::GenerateDailyPlan, next_daily(now, 8, 0)).await
+                self.reschedule(JobKind::GenerateDailyPlan, next_daily(now, 0, 0)).await
             }
             JobKind::MorningReminder => {
                 let today = self.clock.today();
@@ -902,8 +994,8 @@ impl JobHandler for Engine {
             JobKind::TaskWarning { task_id } => self.warn_task(task_id).await,
             JobKind::TaskDeadline { task_id } => self.mark_task_missed(task_id).await,
             JobKind::EndOfDay => {
-                self.end_of_day(now.date_naive()).await?;
-                self.reschedule(JobKind::EndOfDay, next_daily(now, 23, 55)).await
+                self.catch_up_days().await?;
+                self.reschedule(JobKind::EndOfDay, next_daily(now, 0, 0)).await
             }
             JobKind::ReviewDue { .. } => {
                 self.refresh_snapshot().await?;

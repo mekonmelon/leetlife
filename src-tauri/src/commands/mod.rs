@@ -35,7 +35,12 @@ pub async fn get_snapshot(state: State<'_, AppState>) -> Result<Arc<Snapshot>> {
 
 #[tauri::command]
 pub async fn refresh_snapshot(state: State<'_, AppState>) -> Result<Arc<Snapshot>> {
-    state.engine.refresh_snapshot().await
+    let snapshot = state.engine.snapshot().await?;
+    if snapshot.date != state.engine.clock().today() {
+        state.engine.bootstrap().await
+    } else {
+        state.engine.refresh_snapshot().await
+    }
 }
 
 #[tauri::command]
@@ -51,6 +56,21 @@ pub async fn purchase_item(state: State<'_, AppState>, item_id: i64) -> Result<A
 #[tauri::command]
 pub async fn set_equipped(state: State<'_, AppState>, item_id: i64, equipped: bool) -> Result<Arc<Snapshot>> {
     state.engine.set_equipped(item_id, equipped).await
+}
+
+#[tauri::command]
+pub async fn place_item(state: State<'_, AppState>, item_id: i64, placement: crate::home::Placement) -> Result<Arc<Snapshot>> {
+    state.engine.place_item(item_id, placement).await
+}
+
+#[tauri::command]
+pub async fn set_wallpaper(state: State<'_, AppState>, room: String, asset: String) -> Result<Arc<Snapshot>> {
+    state.engine.set_wallpaper(&room, &asset).await
+}
+
+#[tauri::command]
+pub async fn garden_action(state: State<'_, AppState>, action: String, plot: u8, species: Option<String>) -> Result<Arc<Snapshot>> {
+    state.engine.garden_action(&action, plot, species.as_deref()).await
 }
 
 #[tauri::command]
@@ -109,6 +129,7 @@ pub struct SettingsView {
     pub values: HashMap<String, String>,
     pub autostart: bool,
     pub ingest_port: u16,
+    pub data_path: String,
 }
 
 #[tauri::command]
@@ -117,6 +138,7 @@ pub async fn get_settings(app: AppHandle, state: State<'_, AppState>) -> Result<
         values: state.engine.settings().await?,
         autostart: app.autolaunch().is_enabled().unwrap_or(false),
         ingest_port: state.engine.ingest_port().await,
+        data_path: app.path().app_data_dir().map_err(|e| crate::Error::Invalid(e.to_string()))?.join("leetlife.db").to_string_lossy().into_owned(),
     })
 }
 
@@ -157,15 +179,55 @@ pub async fn ui_rendered(state: State<'_, AppState>, render_ms: Option<f64>) -> 
 }
 
 #[tauri::command]
-pub async fn hide_window(app: AppHandle) -> Result<()> {
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.hide();
-    }
+pub async fn hide_window(window: tauri::WebviewWindow) -> Result<()> {
+    let _ = window.hide();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn minimize_window(window: tauri::WebviewWindow) -> Result<()> {
+    window.minimize().map_err(|error| crate::Error::Invalid(error.to_string()))
+}
+
+#[tauri::command]
+pub async fn open_home(app: AppHandle) -> Result<()> {
+    crate::app::open_home(&app);
     Ok(())
 }
 
 #[tauri::command]
 pub async fn quit_app(app: AppHandle) -> Result<()> {
     app.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn backup_database(app: AppHandle, state: State<'_, AppState>) -> Result<String> {
+    let directory = app.path().app_data_dir().map_err(|e| crate::Error::Invalid(e.to_string()))?.join("backups");
+    let destination = directory.join(format!("LeetLife-{}.db", chrono::Local::now().format("%Y-%m-%d-%H%M%S-%f")));
+    state.engine.db().backup(&destination).await?;
+    reveal_path(&destination)?;
+    Ok(destination.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub async fn show_save_folder(app: AppHandle) -> Result<()> {
+    let directory = app.path().app_data_dir().map_err(|e| crate::Error::Invalid(e.to_string()))?;
+    reveal_path(&directory)
+}
+
+fn reveal_path(path: &std::path::Path) -> Result<()> {
+    let mut command = std::process::Command::new("open");
+    if path.is_file() { command.arg("-R"); }
+    command.arg(path).spawn()?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn open_problem(slug: String) -> Result<()> {
+    if slug.is_empty() || slug.len() > 200 || !slug.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-') {
+        return Err(crate::Error::Invalid("Invalid LeetCode problem link".into()));
+    }
+    std::process::Command::new("open").arg(format!("https://leetcode.com/problems/{slug}/")).spawn()?;
     Ok(())
 }

@@ -1,6 +1,6 @@
 // Browser-only stand-in for the Rust backend, so `npm run dev` renders a real
 // house without Tauri. It is intentionally shallow: the real rules live in Rust.
-import type { AttemptOutcome, LogAttemptInput, MetricSummary, Recommendation, SettingsView, ShopItem, Snapshot, Stats, ProblemMeta } from "./types";
+import type { AttemptOutcome, LogAttemptInput, Placement, MetricSummary, Recommendation, SettingsView, ShopItem, Snapshot, Stats, ProblemMeta } from "./types";
 
 const CATALOG: ProblemMeta[] = [
   { id: 1, slug: "two-sum", title: "Two Sum", difficulty: "easy", topic: "Arrays", importance: 1 },
@@ -14,7 +14,19 @@ const ITEMS = [
   { id: 1, name: "Plant", category: "decor", cost: 60, asset_path: "furniture/plant", description: "A small green friend.", min_level: 1 },
   { id: 2, name: "Desk", category: "furniture", cost: 120, asset_path: "furniture/desk", description: "Somewhere to put the keyboard.", min_level: 1 },
   { id: 3, name: "Bed", category: "furniture", cost: 150, asset_path: "furniture/bed", description: "For power naps between Hards.", min_level: 1 },
-  { id: 9, name: "Cat", category: "pet", cost: 400, asset_path: "pets/cat", description: "Sits on the keyboard.", min_level: 3 },
+  { id: 9, name: "Jiji", category: "pet", cost: 400, asset_path: "pets/cat", description: "Sits on the keyboard.", min_level: 3 },
+  { id: 17, name: "Fern & fable", category: "wallpaper", cost: 55, asset_path: "wallpapers/fern", description: "Little fern fronds, pressed into sage paper.", min_level: 1 },
+  { id: 18, name: "Midnight wishes", category: "wallpaper", cost: 75, asset_path: "wallpapers/starlight", description: "A sleeping sky full of hand-painted stars.", min_level: 1 },
+  { id: 19, name: "Wild rose", category: "wallpaper", cost: 55, asset_path: "wallpapers/rose", description: "Climbing flowers on the softest blush paper.", min_level: 1 },
+  { id: 20, name: "Haku", category: "pet", cost: 220, asset_path: "pets/dragon", description: "The white dragon from Spirited Away, with a flowing jade mane.", min_level: 2 },
+  { id: 21, name: "Haku above the clouds", category: "decor", cost: 95, asset_path: "furniture/whale-painting", description: "A framed print of Haku in his white dragon form.", min_level: 1 },
+  { id: 22, name: "Little mushroom lamp", category: "decor", cost: 45, asset_path: "furniture/mushroom-lamp", description: "A warm amber glow from the forest floor.", min_level: 1 },
+  { id: 23, name: "Teatime for spirits", category: "furniture", cost: 70, asset_path: "furniture/tea-table", description: "Acorn cups and a pot that never quite empties.", min_level: 1 },
+  { id: 24, name: "A cloud to sit on", category: "decor", cost: 65, asset_path: "furniture/cloud-cushion", description: "Somehow softer than it looks.", min_level: 1 },
+  { id: 10, name: "Chū & Chibi Totoro", category: "pet", cost: 450, asset_path: "pets/dog", description: "The familiar blue and white Totoros, with their little bundle.", min_level: 4 },
+  { id: 25, name: "Boh & Yubaba’s bird", category: "pet", cost: 260, asset_path: "pets/boh", description: "Boh in his mouse form, with Yubaba’s bird perched on top.", min_level: 2 },
+  { id: 26, name: "Ootori-sama", category: "pet", cost: 180, asset_path: "pets/ootori", description: "A familiar yellow bath spirit with a little folded towel.", min_level: 2 },
+  { id: 27, name: "Aogaeru", category: "pet", cost: 160, asset_path: "pets/aogaeru", description: "The bathhouse frog attendant in his blue robe.", min_level: 1 },
 ];
 
 let snapshot: Snapshot = {
@@ -56,6 +68,7 @@ let snapshot: Snapshot = {
   room_level: 0,
   due_reviews: 1,
   last_reward: null,
+  home: { placements: {}, wallpapers: {} },
 };
 
 function bump(): Snapshot {
@@ -84,7 +97,7 @@ export const mockInvoke = async <T,>(cmd: string, args?: Record<string, unknown>
 
     case "log_attempt": {
       const input = args?.input as LogAttemptInput;
-      const problem = CATALOG.find((p) => p.slug === input.slug) ?? CATALOG[0];
+      const problem = CATALOG.find((p) => p.slug === input.slug) ?? {id:Date.now(),slug:input.slug??"practice",title:input.title??"Practice",difficulty:input.difficulty??"easy",topic:input.topic??"General",importance:.5};
       const solved = input.result === "solved";
       const xp = solved ? { easy: 10, medium: 25, hard: 60 }[problem.difficulty] : 3;
       const coins = solved ? { easy: 15, medium: 30, hard: 70 }[problem.difficulty] : 0;
@@ -124,6 +137,9 @@ export const mockInvoke = async <T,>(cmd: string, args?: Record<string, unknown>
     case "purchase_item": {
       const id = args?.itemId as number;
       const item = ITEMS.find((i) => i.id === id)!;
+      if (!item) throw new Error("Unknown item");
+      if (snapshot.inventory.some(o => o.item.id === id)) throw new Error("You already own that");
+      if (snapshot.avatar.level < item.min_level) throw new Error(`Reach level ${item.min_level} to unlock this`);
       if (snapshot.avatar.coins < item.cost) throw new Error(`not enough coins: this costs ${item.cost} and you have ${snapshot.avatar.coins}`);
       snapshot = {
         ...snapshot,
@@ -140,6 +156,36 @@ export const mockInvoke = async <T,>(cmd: string, args?: Record<string, unknown>
       return bump() as T;
     }
 
+    case "place_item": {
+      const id = Number(args?.itemId);
+      const placement = args?.placement as Placement;
+      if (!snapshot.inventory.some(o=>o.item.id===id)) throw new Error("Find this treasure in the shop first");
+      snapshot = {...snapshot, home: { ...snapshot.home, placements: {...snapshot.home?.placements, [id]:placement}, wallpapers: {...snapshot.home?.wallpapers} }, inventory: snapshot.inventory.map(o=>o.item.id===id?{...o,equipped:true}:o)};
+      const next=bump();emit("state-changed",next);return next as T;
+    }
+    case "set_wallpaper": {
+      const room = String(args?.room);
+      const asset = String(args?.asset);
+      if(asset!=="wallpapers/linen"&&!snapshot.inventory.some(o=>o.item.asset_path===asset))throw new Error("Find this wallpaper in the shop first");
+      snapshot={...snapshot,home:{...snapshot.home,placements:{...snapshot.home?.placements},wallpapers:{...snapshot.home?.wallpapers,[room]:asset}}};
+      const next=bump();emit("state-changed",next);return next as T;
+    }
+    case "garden_action": {
+      if(snapshot.avatar.level<3)throw new Error("Reach level 3 to unlock the backyard");
+      const plot=Number(args?.plot),action=String(args?.action),species=String(args?.species),now=Math.floor(Date.now()/1000);
+      if(!Number.isInteger(plot)||plot<0||plot>=6)throw new Error("Choose a flower bed");
+      const garden={...snapshot.home?.garden};const flower=garden[plot];let coins=snapshot.avatar.coins;
+      if(action==="plant"){
+        if(!["daisy","poppy","moonflower"].includes(species)||flower)throw new Error("Choose an empty bed and a flower");
+        if(coins<8)throw new Error("Seeds cost 8 coins");coins-=8;garden[plot]={species,planted_at:now,watered_at:null};
+      }else if(action==="water"){
+        if(!flower||flower.watered_at!==null)throw new Error("This bed does not need water");garden[plot]={...flower,watered_at:now};
+      }else if(action==="harvest"){
+        if(!flower||flower.watered_at===null||now-flower.planted_at<1800)throw new Error("Your flowers need more time");delete garden[plot];coins+=12;
+      }else throw new Error("Unknown garden action");
+      snapshot={...snapshot,avatar:{...snapshot.avatar,coins},home:{placements:{...snapshot.home?.placements},wallpapers:{...snapshot.home?.wallpapers},garden}};
+      const next=bump();emit("state-changed",next);return next as T;
+    }
     case "get_shop":
       return ITEMS.map((item) => ({
         item,
@@ -166,8 +212,10 @@ export const mockInvoke = async <T,>(cmd: string, args?: Record<string, unknown>
         achievements: [{ key: "streak_7", title: "One week streak", unlocked_at: Math.floor(Date.now() / 1000) - 400000 }],
       } as Stats as T;
 
-    case "get_recommendations":
-      return snapshot.recommendations as Recommendation[] as T;
+    case "get_recommendations": {
+      const filter = (args?.args ?? {}) as { difficulty?: string; topic?: string; only_due?: boolean; limit?: number };
+      return CATALOG.filter(p => (!filter.difficulty || p.difficulty === filter.difficulty) && (!filter.topic || p.topic === filter.topic) && (!filter.only_due || p.id === 322)).slice(0, filter.limit ?? 5).map(problem => ({ problem, score: 1, reason: "A little practice for today", is_review: problem.id === 322 })) as Recommendation[] as T;
+    }
 
     case "search_problems": {
       const q = String(args?.query ?? "").toLowerCase();

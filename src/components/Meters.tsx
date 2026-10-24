@@ -1,9 +1,10 @@
+import { Icon } from "./Icon";
 import type { AvatarState } from "../api/types";
 
 const METERS: { key: keyof Pick<AvatarState, "hunger" | "energy" | "happiness">; label: string; icon: string }[] = [
-  { key: "hunger", label: "Fed", icon: "🍞" },
-  { key: "energy", label: "Energy", icon: "⚡" },
-  { key: "happiness", label: "Mood", icon: "💛" },
+  { key: "hunger", label: "Fed", icon: "tea" },
+  { key: "energy", label: "Energy", icon: "energy" },
+  { key: "happiness", label: "Mood", icon: "heart" },
 ];
 
 export function Meters({ avatar }: { avatar: AvatarState }) {
@@ -13,7 +14,8 @@ export function Meters({ avatar }: { avatar: AvatarState }) {
         const value = avatar[key];
         return (
           <div className="meter" key={key} title={`${label}: ${value}/100`}>
-            <span className="meter-icon" aria-hidden>{icon}</span>
+            <span className="meter-icon" aria-hidden><Icon name={icon} size={13}/></span>
+            <span className="meter-name">{label}</span>
             <div className="meter-track">
               <div
                 className="meter-fill"
@@ -36,7 +38,7 @@ export function XpBar({ into, needed, level }: { into: number; needed: number; l
     <div className="xpbar" title={`${into} / ${needed} XP to level ${level + 1}`} data-testid="xpbar" data-pct={pct}>
       <div className="xpbar-fill" style={{ width: `${pct}%` }} />
       <span className="xpbar-label">
-        Lv {level} · {into}/{needed} XP
+        {into}/{needed} XP · next stop, level {level + 1}
       </span>
     </div>
   );

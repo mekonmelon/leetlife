@@ -1,3 +1,4 @@
+import { Icon } from "../components/Icon";
 import { useEffect, useState } from "react";
 import { ActivityChart, TopicBars } from "../analytics/Charts";
 import { formatMicros, relativeTime } from "../api/format";
@@ -40,6 +41,8 @@ export function StatsPage({ now, onError }: { now: number; onError: (m: string) 
 
   return (
     <div className="page">
+      <h1 className="page-title">Look how you've grown.</h1>
+      <p className="page-subtitle">Every little session leaves a mark.</p>
       <section>
         <h2>Last 14 days</h2>
         <ActivityChart days={stats.last_14_days} />
@@ -79,15 +82,15 @@ export function StatsPage({ now, onError }: { now: number; onError: (m: string) 
           <h2>Achievements</h2>
           <ul className="plain" data-testid="achievements">
             {stats.achievements.map((a) => (
-              <li key={a.key}>🏆 {a.title}</li>
+              <li key={a.key}><Icon name="star" size={14}/> {a.title}</li>
             ))}
           </ul>
         </section>
       )}
 
       {shownMetrics.length > 0 && (
-        <section>
-          <h2>Latency</h2>
+        <details>
+          <summary className="hint">App performance</summary>
           <table className="metrics" data-testid="metrics-table">
             <thead>
               <tr><th>Operation</th><th>n</th><th>p50</th><th>p95</th><th>p99</th></tr>
@@ -104,7 +107,7 @@ export function StatsPage({ now, onError }: { now: number; onError: (m: string) 
               ))}
             </tbody>
           </table>
-        </section>
+        </details>
       )}
 
       <section>
